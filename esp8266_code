@@ -1,0 +1,126 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <Servo.h>
+
+// Configuração do Wi-Fi
+const char* ssid = "Nina_2G";
+const char* password = "Internet1003#";
+
+// Configuração do hostname mDNS
+const char* hostname = "01buttonesp8266";
+
+Servo myServo;
+const int servoPin = 0;   // GPIO0 (D3) conectado ao servo
+const int buttonPin = 14; // GPIO14 (D5) conectado ao botão manual
+
+WiFiServer server(80);
+
+// Variáveis para controle de tempo
+unsigned long lastActionTime = 0;      // Tempo da última ação
+const unsigned long debounceDelay = 300; // Tempo de debounce para o botão manual
+const unsigned long lockDelay = 30000;   // Tempo de bloqueio para novo comando (30 segundos)
+
+bool locked = false; // Indica se está bloqueado para novos comandos
+
+void setup() {
+  Serial.begin(115200);
+
+  // Configurações do servo e botão
+  myServo.attach(servoPin);
+  myServo.write(0); // Define a posição inicial do servo
+  pinMode(buttonPin, INPUT_PULLUP); // Configura o botão com resistor de pull-up interno
+
+  // Conexão Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.println("Conectando ao Wi-Fi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nConectado ao Wi-Fi!");
+  Serial.print("Endereço IP: ");
+  Serial.println(WiFi.localIP());
+
+  // Configuração do mDNS
+  if (MDNS.begin(hostname)) {
+    Serial.println("mDNS configurado com sucesso!");
+    Serial.print("Acesse o dispositivo em: http://");
+    Serial.print(hostname);
+    Serial.println(".local");
+  } else {
+    Serial.println("Falha ao configurar o mDNS.");
+  }
+
+  // Inicia o servidor
+  server.begin();
+  Serial.println("Servidor iniciado.");
+}
+
+void moveServo() {
+  Serial.println("Movimentando o servo...");
+
+  // Movimenta o servo duas vezes lentamente
+  for (int i = 0; i < 2; i++) {
+    for (int angle = 0; angle <= 50; angle += 2) {
+      myServo.write(angle);
+      delay(20);
+    }
+    for (int angle = 50; angle >= 0; angle -= 2) {
+      myServo.write(angle);
+      delay(20);
+    }
+  }
+
+  Serial.println("Movimento completo.");
+}
+
+void loop() {
+  // Atualiza o serviço mDNS
+  MDNS.update();
+
+  // Verifica se o botão manual foi pressionado
+  if (digitalRead(buttonPin) == LOW && !locked) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastActionTime > debounceDelay) {
+      Serial.println("Botão manual pressionado.");
+      moveServo();
+      lastActionTime = currentTime; // Atualiza o tempo da última ação
+      locked = true;               // Ativa o bloqueio
+    }
+  }
+
+  // Desbloqueia após 30 segundos
+  if (locked && millis() - lastActionTime > lockDelay) {
+    locked = false;
+    Serial.println("Trava liberada para novo comando.");
+  }
+
+  // Verifica se há cliente no servidor
+  WiFiClient client = server.available();
+  if (client) {
+    Serial.println("Novo cliente conectado.");
+    String request = client.readStringUntil('\r');
+    client.flush();
+
+    // Verifica se a requisição contém o comando esperado
+    if (request.indexOf("/action") != -1 && !locked) {
+      Serial.println("Comando recebido via Wi-Fi.");
+      moveServo();
+      lastActionTime = millis(); // Atualiza o tempo da última ação
+      locked = true;             // Ativa o bloqueio
+    }
+
+    // Responde ao cliente
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println("Connection: close");
+    client.println();
+    if (locked) {
+      client.println("Comando bloqueado: aguarde 30 segundos antes de novo acionamento.");
+    } else {
+      client.println("Comando recebido e executado.");
+    }
+    client.stop();
+    Serial.println("Cliente desconectado.");
+  }
+}
