@@ -1,0 +1,70 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+
+// Configurações de Wi-Fi
+const char* ssid = "Nina_2G";
+const char* password = "Internet1003#";
+
+// Configuração do botão
+const int buttonPin = 2; // GPIO2 (D4)
+bool lastButtonState = HIGH;
+unsigned long lastPressTime = 0;
+const unsigned long debounceDelay = 200;
+
+// Endereço do ESP8266 receptor
+const char* serverUrl = "http://01buttonesp8266.local/action"; // Substitua pelo IP do ESP8266 receptor
+
+void setup() {
+  Serial.begin(115200);
+
+  // Configuração do botão
+  pinMode(buttonPin, INPUT_PULLUP);
+
+  // Conexão Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.println("Conectando ao Wi-Fi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nConectado ao Wi-Fi!");
+  Serial.print("Endereço IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  int buttonState = digitalRead(buttonPin);
+
+  // Detecta o pressionamento do botão (com debounce)
+  if (buttonState == LOW && lastButtonState == HIGH && (millis() - lastPressTime > debounceDelay)) {
+    Serial.println("Botão pressionado. Enviando comando...");
+    sendCommand();
+    lastPressTime = millis();
+  }
+  lastButtonState = buttonState;
+}
+
+// Função para enviar o comando ao ESP8266 receptor
+void sendCommand() {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClient client;
+    HTTPClient http;
+
+    // Usa o novo formato de begin com WiFiClient
+    http.begin(client, serverUrl);
+
+    int httpCode = http.GET();
+    if (httpCode > 0) {
+      Serial.printf("Resposta HTTP: %d\n", httpCode);
+      String payload = http.getString();
+      Serial.println("Resposta do servidor:");
+      Serial.println(payload);
+    } else {
+      Serial.printf("Erro ao enviar comando: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    http.end();
+  } else {
+    Serial.println("Falha na conexão Wi-Fi.");
+  }
+}
